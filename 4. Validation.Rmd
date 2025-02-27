@@ -1,0 +1,142 @@
+---
+title: "Validación del modelo"
+output: html_document
+---
+
+--------------------------------------------------------------------------------
+*VALIDACIÓN CRUZADA MEDIANTE K-FOLDS*
+
+```{r}
+# Cargar bibliotecas necesarias
+library(caret)
+library(survival)
+library(dbscan)
+library(survminer)
+
+# Parámetros de DBSCAN
+eps_value <- 0.1  # Radio inicial para la vecindad
+minPts_value <- 15  # Puntos mínimos para formar un clúster
+
+# Número de pliegues para la validación cruzada
+n_folds <- 5
+set.seed(333)  
+
+# Crear los pliegues de validación cruzada
+folds <- createFolds(survival_data$status, k = n_folds, list = TRUE)
+
+# Inicializar variables para almacenar resultados
+c_index_values <- c()
+p_values <- c()
+num_clusters <- c()
+num_noise <- c()
+
+# Loop para realizar validación cruzada
+for (i in 1:n_folds) {
+  # Dividir en conjunto de entrenamiento y prueba
+  test_idx <- folds[[i]]
+  train_data <- survival_data[-test_idx, ]
+  test_data <- survival_data[test_idx, ]
+  
+  # Ajustar el modelo de Cox en el conjunto de entrenamiento
+  modelo_cox_train <- coxph(Surv(time, status) ~ ., data = train_data)
+  
+  # Calcular los scores de riesgo en el conjunto de prueba
+  test_data$risk_score <- predict(modelo_cox_train, newdata = test_data, type = "risk")
+  
+  # Ejecutar DBSCAN sobre los scores de riesgo
+  dbscan_result <- dbscan(as.matrix(test_data$risk_score), eps = eps_value, minPts = minPts_value)
+  
+  # Asignar los clústeres de DBSCAN al conjunto de prueba
+  test_data$dbscan_cluster <- factor(dbscan_result$cluster)
+  
+  # Obtener la cantidad de clústeres y puntos de ruido
+  num_clusters <- c(num_clusters, length(unique(dbscan_result$cluster)) - 1) # excluye ruido (-1)
+  num_noise <- c(num_noise, sum(dbscan_result$cluster == 0))
+  
+  # Calcular el índice de concordancia (C-index)
+  concordance_res <- concordance(coxph(Surv(time, status) ~ risk_score, data = test_data))
+  c_index <- concordance_res$concordance
+  c_index_values <- c(c_index_values, c_index)
+  
+  # Calcular la significancia de las curvas de supervivencia utilizando la prueba de log-rank
+  surv_diff <- survdiff(Surv(time, status) ~ dbscan_cluster, data = test_data)
+  p_val <- 1 - pchisq(surv_diff$chisq, length(surv_diff$n) - 1)
+  p_values <- c(p_values, p_val)
+  
+  # Graficar las curvas de supervivencia para los clústeres
+  ggsurvplot(
+    survfit(Surv(time, status) ~ dbscan_cluster, data = test_data),
+    data = test_data,
+    risk.table = TRUE,
+    pval = TRUE,
+    title = paste("Curvas de Supervivencia (Fold", i, ")"),
+    xlab = "Tiempo",
+    ylab = "Supervivencia",
+    legend.title = "Grupos de riesgo",
+    palette = "Dark2",
+    risk.table.height = 0.35, 
+    ggtheme = theme_minimal(base_size = 15)
+  )
+}
+
+# Resultados finales
+mean_num_clusters <- mean(num_clusters)
+mean_c_index <- mean(c_index_values, na.rm = TRUE)
+mean_p_value <- mean(p_values, na.rm = TRUE)
+mean_num_noise <- mean(num_noise)
+
+cat("\n")
+cat("Número promedio de clústeres:", mean_num_clusters, "\n")
+cat("Índice de concordancia (C-index):", mean_c_index, "\n")
+cat("P-value (curvas de supervivencia):", mean_p_value, "\n")
+if (mean_p_value < 0.05) {
+  cat("El modelo muestra diferencias estadísticamente significativas entre los grupos de riesgo.\n")
+} else {
+  cat("El modelo no muestra diferencias estadísticamente significativas entre los grupos de riesgo.\n")
+}
+
+cat("Número de outliers promedio:", mean_num_noise, "\n")
+
+```
+
+
+Frecuencias de cada clúster
+```{r}
+# Crear tabla de frecuencias de los clústeres
+cluster_table <- table(all_clusters_combined)
+
+# Mostrar la tabla
+print(cluster_table)
+
+# Si deseas calcular el porcentaje de outliers (clúster -1)
+num_outliers <- sum(all_clusters_combined == 0)
+cat("Número total de outliers:", num_outliers, "\n")
+cat("Porcentaje de outliers:", (num_outliers / length(all_clusters_combined)) * 100, "%\n")
+```
+
+Score de riesgo
+```{r}
+library(dplyr)
+# Calcular la media del score de riesgo para cada clúster
+mean_risk_scores_by_cluster <- test_data %>%
+  group_by(dbscan_cluster) %>%
+  summarize(mean_risk_score = mean(risk_score, na.rm = TRUE))
+
+# Mostrar los resultados
+print(mean_risk_scores_by_cluster)
+```
+
+Supervivencia
+```{r}
+surv_mean <- test_data %>%
+  group_by(dbscan_cluster) %>%
+  summarize(mean_survival = mean(time, na.rm = TRUE))
+print(surv_mean)
+
+```
+
+
+
+
+
+

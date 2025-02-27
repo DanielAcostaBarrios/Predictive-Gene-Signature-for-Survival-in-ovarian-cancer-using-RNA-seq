@@ -1,0 +1,175 @@
+---
+title: "Identificación de genes asociados con la supervivencia"
+output: html_document
+---
+
+---------------------------------------------------------
+*ANÁLISIS DE SUPERVIVENCIA*
+
+Utilizaremos un modelo de riesgos proporcionales de Cox para identificar genes cuyos niveles de expresión están significativamente asociados con la supervivencia.
+
+Para poder realizar este análisis de supervivencia definiremos dos variables:
+- status: indica el estado del paciente, pudiendo ser vivo (vital_status = "Alive") o fallecido (vital_status = "Dead").
+- time: muestra los tiempos de seguimiento. Obtenido de la variable 'days_to_last_follow_up' para los pacientes vivos y de la variable days_to_death para los pacientes que han fallecido.
+
+```{r}
+# Definir la variable 'status' para el estado del paciente (1 = fallecido, 0 = vivo)
+datos_clinicos_filtrados$status <- ifelse(
+  datos_clinicos_filtrados$vital_status == "Dead", 1, 0
+)
+
+# Definir la variable 'time' para el tiempo de seguimiento
+datos_clinicos_filtrados$time <- ifelse(
+  is.na(datos_clinicos_filtrados$days_to_death), 
+  datos_clinicos_filtrados$days_to_last_follow_up, 
+  datos_clinicos_filtrados$days_to_death
+)
+
+```
+
+Antes de llevar a cabo el análisis de supervivencia confirmamos que ambos conjuntos de datos se alinean correctamente. Para ello, comprobamos que las filas de datos clínicos y las columnas de datos de expresión coinciden.
+```{r}
+# Reordenar las filas de datos clínicos y  columnas de datos de expresión
+datos_clinicos_filtrados <- datos_clinicos_filtrados[rownames(datos_clinicos_filtrados) %in% colnames(datos_expresion_filtrados), ]
+datos_expresion_filtrados <- datos_expresion_filtrados[, rownames(datos_clinicos_filtrados)]
+
+```
+
+Realizamos el análisis univariante de Cox.
+```{r}
+
+# Instalar y cargar el paquete "survival"
+if (!requireNamespace("survival", quietly = TRUE)) {
+    install.packages("survival")
+}
+library(survival)
+
+# Crear un dataframe para almacenar los resultados
+resultados_cox <- data.frame(Gene = character(), HR = numeric(), p.value = numeric(), stringsAsFactors = FALSE)
+
+# Iterar sobre cada gen en la matriz de expresión génica
+for (gen in rownames(datos_expresion_filtrados)) {
+  
+  # Obtener los niveles de expresión del gen
+  expresion <- datos_expresion_filtrados[gen, ]
+  
+  # Fórmula para el modelo de Cox
+  cox_formula <- as.formula(Surv(time, status) ~ expresion)
+  
+  # Ajustar el modelo de Cox
+  cox_modelo <- coxph(cox_formula, data = datos_clinicos_filtrados)
+  
+  # Extraer el índice de riesgo (HR) y el p-value
+  summary_cox <- summary(cox_modelo)
+  HR <- summary_cox$coefficients[,"exp(coef)"]
+  p.value <- summary_cox$coefficients[,"Pr(>|z|)"]
+  
+  # Almacenar los resultados en el dataframe
+  resultados_cox <- rbind(resultados_cox, data.frame(Gene = gen, HR = HR, p.value = p.value))
+}
+
+print(resultados_cox)
+```
+
+
+----------------------------------------------
+*AJUSTE POR MÚLTIPLES COMPARACIONES*
+
+```{r}
+# Comprobar si hay valores faltantes (NA) en los p-valores
+any(is.na(resultados_cox$p.value))
+
+# Eliminar filas con NA en los p-valores
+resultados_cox <- resultados_cox[!is.na(resultados_cox$p.value), ]
+
+```
+
+Aplicamos el método de Benjamini-Hochberg.
+```{r}
+# Aplicar el método de Benjamini-Hochberg 
+resultados_cox$p.adjust <- p.adjust(resultados_cox$p.value, method = "BH")
+
+# Filtrar los genes con p-valores ajustados significativos
+genes_significativos_ajustados <- resultados_cox[resultados_cox$p.adjust < 0.05, ]
+
+print(genes_significativos_ajustados)
+
+```
+
+
+----------------------------------------------
+*CURVAS DE KAPLAN-MEIER* 
+
+Visualizaremos los resultados a través de las curvas de Kaplan-Meir.
+```{r}
+
+library(survival)
+library(survminer)
+
+# Crear una lista para almacenar los gráficos
+lista_graficos <- list()
+
+# Crear una lista para almacenar los p-valores ajustados
+lista_pvalores <- list()
+
+# Iterar sobre cada gen
+for (gen in genes_significativos_ajustados$Gene) {
+  
+  # Convertir gen a carácter si es necesario
+  gen <- as.character(gen)
+  
+  # Extraer el p-valor ajustado
+  pval_ajustado <- resultados_cox[resultados_cox$Gene == gen, "p.adjust"]
+  
+  # Comprobar si el gen tiene un p-valor ajustado
+  if (length(pval_ajustado) == 0) {
+    print(paste("No se encontró el gen:", gen, "en resultados_cox."))
+    next
+  }
+  
+  # Guardar el p-valor ajustado en la lista
+  lista_pvalores[[gen]] <- pval_ajustado
+  
+  # Generar la gráfica
+  expresion <- datos_expresion_filtrados[gen, ]
+  grupo_expresion <- ifelse(expresion > median(expresion, na.rm = TRUE), "High", "Low")
+  
+  datos_km <- data.frame(
+    time = datos_clinicos_filtrados$time,
+    status = datos_clinicos_filtrados$status,
+    grupo_expresion = grupo_expresion
+  )
+  
+  surv_obj <- Surv(datos_km$time, datos_km$status)
+  fit_km <- survfit(surv_obj ~ grupo_expresion, data = datos_km)
+  
+  plot_km <- ggsurvplot(
+    fit_km, 
+    data = datos_km,
+    ggtheme = theme_minimal(),
+    title = paste("Curva de Kaplan-Meier para el gen", gen),
+    xlab = "Tiempo (días)",
+    ylab = "Probabilidad de supervivencia",
+    legend.title = gen,
+    legend.labs = c("Expresión baja del gen", "Expresión alta del gen")
+  )
+  
+  # Agregar el p-valor ajustado al gráfico
+  plot_km$plot <- plot_km$plot +
+    annotate(
+      "text", x = max(datos_km$time) * 0.4, y = 0.5, 
+      label = paste("p-ajustado =", signif(pval_ajustado, digits = 3)),
+      size = 5, hjust = 0
+    )
+  
+  # Guardar el gráfico en la lista
+  lista_graficos[[gen]] <- plot_km
+}
+
+# Mostrar los gráficos uno por uno
+for (grafico in lista_graficos) {
+  print(grafico)
+}
+
+```
+

@@ -1,0 +1,772 @@
+---
+title: "Desarrollo de la firma génica"
+output: html_document
+---
+
+--------------------------------------------------------------------------------
+*SELECECCIÓN DE GENES*
+
+*Análisis de Componentes Principales (PCA)*
+```{r}
+# Instalar los paquetes FactoMineR y factoextra
+if (!requireNamespace("FactoMineR", quietly = TRUE)) {
+    install.packages("FactoMineR")
+}
+if (!requireNamespace("factoextra", quietly = TRUE)) {
+    install.packages("factoextra")
+}
+library(FactoMineR)
+library(factoextra)
+
+# Transponer la matriz de expresión para que las filas correspondan a las muestras y las columnas a las variables (los genes)
+datos_expresion_transpuestos <- t(datos_expresion_filtrados)
+
+# Realizar el Análisis de Componentes Principales (PCA)
+pca <- PCA(datos_expresion_transpuestos, graph = FALSE)
+
+# Visualizar los componentes principales y los genes con mayor contribución al primer componente
+fviz_eig(pca, addlabels = TRUE, ylim = c(0, 50))
+summary(pca)
+fviz_contrib(pca, choice = "var", axes = 1, top = 10)
+
+```
+
+Gráfico de Scree Plot con línea de referencia para el Criterio de Kaiser.
+```{r}
+library(FactoMineR)
+library(factoextra)
+
+# Obtener los eigenvalues
+eigenvalues <- pca$eig[, 1]
+
+# Criterio de Kaiser: seleccionar los componentes con eigenvalue > 1
+componentes_seleccionados <- which(eigenvalues > 1)
+
+# Visualizar el scree plot con una línea de referencia para eigenvalue = 1
+fviz_eig(pca, addlabels = TRUE, ylim = c(0, 25)) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red") +
+  labs(title = "Scree Plot con criterio de Kaiser", 
+       y = "Eigenvalues", 
+       x = "Componentes principales")
+
+```
+
+Varianza acumulada.
+```{r}
+library(FactoMineR)
+library(factoextra)
+
+# Calcular la varianza acumulada que se explica
+varianza_acumulada <- cumsum(pca$eig[, 2])
+
+# Calcular el número mínimo de componentes para cada umbral de varianza acumulada
+componentes_50_varianza <- which(varianza_acumulada >= 50)[1]
+componentes_70_varianza <- which(varianza_acumulada >= 70)[1]
+componentes_80_varianza <- which(varianza_acumulada >= 80)[1]
+
+# Imprimir los resultados
+print(paste("Componentes para explicar al menos el 50% de la varianza:", componentes_50_varianza))
+print(paste("Componentes para explicar al menos el 70% de la varianza:", componentes_70_varianza))
+print(paste("Componentes para explicar al menos el 80% de la varianza:", componentes_80_varianza))
+
+# Imprimir la varianza acumulada para cada componente
+print("Varianza acumulada por componente:")
+print(varianza_acumulada)
+
+```
+
+
+
+*Análisis de multicolinealidad*
+
+*5 PCs*
+
+Matriz de correlación.
+```{r}
+# Extraer las coordenadas de los componentes principales (PCs)
+pca_coords <- pca$ind$coord
+
+# Calcular la matriz de correlación entre los componentes principales
+matriz_correlacion <- cor(pca_coords)
+
+# Visualizar la matriz de correlación
+print(matriz_correlacion)
+
+# Instalar y cargar el paquete corrplot para visualizar la matriz de correlación
+if (!requireNamespace("corrplot", quietly = TRUE)) {
+    install.packages("corrplot")
+}
+library(corrplot)
+
+# Visualización de la matriz de correlación con corrplot
+corrplot(matriz_correlacion, method = "color", type = "upper", tl.col = "black", tl.srt = 45, addCoef.col = "black")
+
+```
+
+Factor de Inflación de la Varianza (VIF).
+```{r}
+# Instalar y cargar el paquete car para calcular el VIF
+if (!requireNamespace("car", quietly = TRUE)) {
+    install.packages("car")
+}
+library(car)
+
+# Crear un dataframe con los componentes principales y las variables dependientes (estado y tiempo)
+datos_pca_vif <- cbind(datos_clinicos_filtrados$status, datos_clinicos_filtrados$time, pca_coords)
+colnames(datos_pca_vif)[1:2] <- c("status", "time")
+
+# Ajustar un modelo lineal múltiple con los componentes principales como predictores
+modelo_vif <- lm(status ~ ., data = as.data.frame(datos_pca_vif))
+
+# Calcular el VIF
+vif_valores <- vif(modelo_vif)
+
+# Visualizar los VIF
+print(vif_valores)
+
+```
+
+*73 PCs*
+Matriz de correlación.
+```{r}
+# Realizar el Análisis de Componentes Principales (PCA)
+pca <- PCA(datos_expresion_transpuestos, graph = FALSE, ncp = 73)  
+
+# Extraer las coordenadas de los primeros 10 componentes principales (PCs)
+pca_coords <- pca$ind$coord[, 1:73]  
+
+# Calcular la matriz de correlación 
+matriz_correlacion <- cor(pca_coords)
+
+# Visualizar los componentes 1-37
+matriz_correlacion_1_37 <- cor(pca_coords[, 1:37])
+corrplot(matriz_correlacion_1_37, method = "color", type = "upper", 
+         tl.col = "black", tl.srt = 45)
+
+# Visualizar los componentes 38-73
+matriz_correlacion_38_73 <- cor(pca_coords[, 38:73])
+corrplot(matriz_correlacion_38_73, method = "color", type = "upper", 
+         tl.col = "black", tl.srt = 45)
+
+```
+
+Factor de Inflación de la Varianza (VIF).
+```{r}
+# Instalar y cargar el paquete car para calcular el VIF
+if (!requireNamespace("car", quietly = TRUE)) {
+    install.packages("car")
+}
+library(car)
+
+# Crear un dataframe con los componentes principales y las variables dependientes (estado y tiempo)
+datos_pca_vif <- cbind(datos_clinicos_filtrados$status, datos_clinicos_filtrados$time, pca_coords)
+colnames(datos_pca_vif)[1:2] <- c("status", "time")
+
+# Ajustar un modelo lineal múltiple con los componentes principales como predictores
+modelo_vif <- lm(status ~ ., data = as.data.frame(datos_pca_vif))
+
+# Calcular el VIF
+vif_valores <- vif(modelo_vif)
+
+# Visualizar los VIF
+print(vif_valores)
+
+```
+
+*161 PCs*
+Matriz de correlación.
+```{r}
+# Realizar el Análisis de Componentes Principales (PCA)
+pca <- PCA(datos_expresion_transpuestos, graph = FALSE, ncp = 161)  
+
+# Extraer las coordenadas 
+pca_coords <- pca$ind$coord[, 1:161]  
+
+# Calcular la matriz de correlación entre los primeros 10 componentes principales
+matriz_correlacion <- cor(pca_coords)
+
+# Visualizar la matriz de correlación
+print(matriz_correlacion)
+
+# Visualizar los componentes 1-40
+matriz_correlacion_1_40 <- cor(pca_coords[, 1:40])
+corrplot(matriz_correlacion_1_40, method = "color", type = "upper", 
+         tl.col = "black", tl.srt = 45)
+
+# Visualizar los componentes 41-82
+matriz_correlacion_41_81 <- cor(pca_coords[, 41:81])
+corrplot(matriz_correlacion_41_81, method = "color", type = "upper", 
+         tl.col = "black", tl.srt = 45)
+
+# Visualizar los componentes 82-121
+matriz_correlacion_82_121 <- cor(pca_coords[, 82:121])
+corrplot(matriz_correlacion_82_121, method = "color", type = "upper", 
+         tl.col = "black", tl.srt = 45)
+
+# Visualizar los componentes 122-161
+matriz_correlacion_122_161 <- cor(pca_coords[, 122:161])
+corrplot(matriz_correlacion_122_161, method = "color", type = "upper", 
+         tl.col = "black", tl.srt = 45)
+
+```
+
+Factor de Inflación de la Varianza (VIF).
+```{r}
+# Instalar y cargar el paquete car para calcular el VIF
+if (!requireNamespace("car", quietly = TRUE)) {
+    install.packages("car")
+}
+library(car)
+
+# Crear un dataframe con los componentes principales y las variables dependientes (estado y tiempo)
+datos_pca_vif <- cbind(datos_clinicos_filtrados$status, datos_clinicos_filtrados$time, pca_coords)
+colnames(datos_pca_vif)[1:2] <- c("status", "time")
+
+# Ajustar un modelo lineal múltiple con los componentes principales como predictores
+modelo_vif <- lm(status ~ ., data = as.data.frame(datos_pca_vif))
+
+# Calcular el VIF
+vif_valores <- vif(modelo_vif)
+
+# Visualizar los VIF
+print(vif_valores)
+
+```
+
+*226 componentes*
+
+Matriz de correlación.
+```{r}
+# Realizar el Análisis de Componentes Principales 
+pca <- PCA(datos_expresion_transpuestos, graph = FALSE, ncp = 226)  
+
+# Extraer las coordenadas 
+pca_coords <- pca$ind$coord[, 1:226]  
+
+# Calcular la matriz de correlación 
+matriz_correlacion <- cor(pca_coords)
+
+# Visualizar los primeros 1-57 componentes
+matriz_correlacion_1_57 <- cor(pca_coords[, 1:57])
+corrplot(matriz_correlacion_1_57, method = "color", type = "upper", tl.col = "black", tl.srt = 45)
+
+# Visualizar los componentes 58-114
+matriz_correlacion_58_114 <- cor(pca_coords[, 58:114])
+corrplot(matriz_correlacion_58_114, method = "color", type = "upper", tl.col = "black", tl.srt = 45)
+
+# Visualizar los componentes 115-170
+matriz_correlacion_115_170 <- cor(pca_coords[, 115:170])
+corrplot(matriz_correlacion_115_170, method = "color", type = "upper", tl.col = "black", tl.srt = 45)
+
+# Visualizar los componentes 171-226
+matriz_correlacion_171_226 <- cor(pca_coords[, 171:226])
+corrplot(matriz_correlacion_171_226, method = "color", type = "upper", tl.col = "black", tl.srt = 45)
+
+```
+
+Factor de Inflación de la Varianza (VIF).
+```{r}
+# Visualización de la matriz con clustering
+corrplot(matriz_correlacion, method = "color", type = "upper", tl.col = "black", tl.srt = 45, 
+         order = "hclust", addrect = 5)  # 'addrect' agrega rectángulos alrededor de clusters
+
+```
+```{r}
+# Instalar y cargar el paquete car para calcular el VIF
+if (!requireNamespace("car", quietly = TRUE)) {
+    install.packages("car")
+}
+library(car)
+
+# Crear un dataframe con los componentes principales y las variables dependientes (estado y tiempo)
+datos_pca_vif <- cbind(datos_clinicos_filtrados$status, datos_clinicos_filtrados$time, pca_coords)
+colnames(datos_pca_vif)[1:2] <- c("status", "time")
+
+# Ajustar un modelo lineal múltiple con los componentes principales como predictores
+modelo_vif <- lm(status ~ ., data = as.data.frame(datos_pca_vif))
+
+# Calcular el VIF
+vif_valores <- vif(modelo_vif)
+
+# Visualizar los VIF
+print(vif_valores)
+
+```
+
+
+*Validación cruzada*
+
+Cálculo del C-index.
+```{r}
+# Cargar las librerías necesarias
+library(survival)
+library(caret)  # Para validación cruzada
+
+# Crear una función para realizar el PCA y la validación cruzada
+validacion_cruzada_pca_cox <- function(datos_expresion_transpuestos, datos_clinicos_filtrados, num_componentes) {
+  
+  # Realizar el PCA con el número de componentes especificado
+  pca <- PCA(datos_expresion_transpuestos, graph = FALSE, ncp = num_componentes)
+  
+  # Extraer las coordenadas de los componentes seleccionados
+  pca_coords <- pca$ind$coord[, 1:num_componentes]
+  
+  # Añadir los componentes seleccionados a los datos clínicos
+  datos_clinicos_filtrados <- cbind(datos_clinicos_filtrados, pca_coords)
+  
+  # Definir el número de folds para la validación cruzada
+  numero_folds <- 10
+  
+  # Crear un vector de índices para los folds
+  set.seed(123)  # Para reproducibilidad
+  folds <- createFolds(datos_clinicos_filtrados$status, k = numero_folds, returnTrain = TRUE)
+  
+  # Almacenar los resultados de cada fold
+  resultados_folds <- list()
+  
+  # Iterar sobre cada fold
+  for (i in 1:numero_folds) {
+    # Dividir los datos en conjunto de entrenamiento y prueba
+    entrenamiento <- datos_clinicos_filtrados[folds[[i]], ]
+    prueba <- datos_clinicos_filtrados[-folds[[i]], ]
+    
+    # Crear la fórmula del modelo de Cox utilizando los componentes seleccionados
+    cox_formula <- as.formula(paste("Surv(time, status) ~ ", paste(colnames(pca_coords), collapse = " + ")))
+    
+    # Ajustar el modelo de Cox con los datos de entrenamiento
+    cox_modelo <- coxph(cox_formula, data = entrenamiento)
+    
+    # Evaluar el modelo con los datos de prueba
+    prediccion <- predict(cox_modelo, newdata = prueba, type = "lp")
+    
+    # Calcular el AUC o la concordancia para medir el rendimiento del modelo
+    c_index <- summary(cox_modelo)$concordance[1]
+    
+    # Guardar el índice de concordancia (C-index) para este fold
+    resultados_folds[[i]] <- c_index
+  }
+  
+  # Calcular el promedio del C-index para los folds
+  promedio_c_index <- mean(unlist(resultados_folds))
+  
+  return(promedio_c_index)
+}
+
+# Aplicar la validación cruzada para diferentes números de componentes
+componentes_list <- c(5, 73, 161, 226)
+
+resultados_validacion <- data.frame(
+  NumComponentes = componentes_list,
+  C_Index = sapply(componentes_list, function(nc) validacion_cruzada_pca_cox(datos_expresion_transpuestos, datos_clinicos_filtrados, nc))
+)
+
+# Imprimir los resultados
+print(resultados_validacion)
+
+```
+
+
+Crear un data frame para los datos de supervivencia.
+```{r}
+# Crear un data frame para los datos de supervivencia
+survival_data <- data.frame(
+  time = datos_clinicos_filtrados$time,
+  status = datos_clinicos_filtrados$status
+)
+```
+
+
+Calcular los scores de riesgo y generar las curvas ROC.
+```{r}
+# Instalar y cargar las bibliotecas necesarias
+if (!requireNamespace("pROC", quietly = TRUE)) {
+    install.packages("pROC")
+}
+
+library(survival)
+library(pROC)
+
+# Función para ajustar un modelo de Cox y calcular el score de riesgo
+calcular_score_riesgo <- function(componentes, survival_data) {
+  # Crear un data frame combinando los datos de supervivencia con los componentes principales
+  datos_modelo <- as.data.frame(componentes)
+  datos_modelo <- cbind(survival_data, datos_modelo)
+  
+  # Ajustar el modelo de Cox multivariante utilizando los componentes principales
+  modelo_cox <- coxph(Surv(time, status) ~ ., data = datos_modelo)
+  
+  # Obtener los coeficientes para cada componente
+  coeficientes <- coef(modelo_cox)
+  
+  # Calcular el score de riesgo para cada paciente
+  score_riesgo <- as.matrix(datos_modelo[, -(1:2)]) %*% coeficientes
+  
+  return(score_riesgo)
+}
+
+# Función para generar la curva ROC usando el score de riesgo ya calculado
+generar_roc <- function(score_riesgo, status, n_componentes) {
+  # Generar la curva ROC basada en el score de riesgo y el status
+  roc_obj <- roc(status, score_riesgo)
+  
+  # Visualizar la curva ROC
+  plot(roc_obj, main = paste("Curva ROC para", n_componentes, "Componentes Principales"))
+  
+  # Retornar el objeto ROC para análisis adicional si se desea
+  return(roc_obj)
+}
+
+# Extraer las coordenadas de los componentes principales de PCA ya realizado
+componentes_5   <- pca_226$ind$coord[, 1:5]    # Selecciona los primeros 5 componentes
+componentes_73  <- pca_226$ind$coord[, 1:73]   # Selecciona los primeros 73 componentes
+componentes_161 <- pca_226$ind$coord[, 1:161]  # Selecciona los primeros 161 componentes
+componentes_226 <- pca_226$ind$coord[, 1:226]  # Selecciona los primeros 226 componentes
+
+# Calcular los scores de riesgo para cada conjunto de componentes
+score_riesgo_5   <- calcular_score_riesgo(componentes_5, survival_data)
+score_riesgo_73  <- calcular_score_riesgo(componentes_73, survival_data)
+score_riesgo_161 <- calcular_score_riesgo(componentes_161, survival_data)
+score_riesgo_226 <- calcular_score_riesgo(componentes_226, survival_data)
+
+# Lista de scores de riesgo y etiquetas de componentes
+scores_lista <- list(score_riesgo_5, score_riesgo_73, score_riesgo_161, score_riesgo_226)
+componentes_labels <- c("5 Componentes", "73 Componentes", "161 Componentes", "226 Componentes")
+
+# Generar las curvas ROC para cada conjunto de componentes
+roc_5   <- generar_roc(score_riesgo_5, survival_data$status, 5)
+roc_73  <- generar_roc(score_riesgo_73, survival_data$status, 73)
+roc_161 <- generar_roc(score_riesgo_161, survival_data$status, 161)
+roc_226 <- generar_roc(score_riesgo_226, survival_data$status, 226)
+
+# Comparar las áreas bajo la curva (AUC) entre diferentes modelos
+auc_5   <- auc(roc_5)
+auc_73  <- auc(roc_73)
+auc_161 <- auc(roc_161)
+auc_226 <- auc(roc_226)
+
+# Imprimir los AUCs para comparar el rendimiento
+print(paste("AUC para 5 componentes:", auc_5))
+print(paste("AUC para 73 componentes:", auc_73))
+print(paste("AUC para 161 componentes:", auc_161))
+print(paste("AUC para 226 componentes:", auc_226))
+
+```
+
+
+--------------------------------------------------------------------------------
+*MODELO PREDICTIVO*
+
+*Crear un modelo con 161 componentes.*
+```{r}
+# Realizar la PCA
+library(FactoMineR)
+pca_161 <- PCA(datos_expresion_transpuestos, ncp = 161, graph = FALSE)
+
+#  Obtener las coordenadas de los componentes
+componentes <- pca_161$ind$coord  
+
+```
+
+```{r}
+# Comprobamos que las filas de los datos de supervivencia coincidan con las filas de los componentes
+rownames(survival_data) <- rownames(componentes)
+
+# Crear un data frame combinando los datos de supervivencia con los componentes principales
+datos_modelo <- as.data.frame(componentes)
+datos_modelo <- cbind(survival_data, datos_modelo)
+
+# Ajustar el modelo de Cox multivariante utilizando los 161 componentes principales
+modelo_cox <- coxph(Surv(time, status) ~ ., data = datos_modelo)
+
+# Resumen del modelo de Cox
+summary(modelo_cox)
+
+# Obtener los coeficientes para cada componente
+coeficientes <- coef(modelo_cox)
+
+# Calcular el score de riesgo para cada paciente
+datos_modelo$score_riesgo <- as.matrix(datos_modelo[, -(1:2)]) %*% coeficientes
+```
+
+
+*Establecer diferentes criterios de clasificación.*
+
+Media, mediana y percentiles.
+```{r}
+# Crear umbrales para los diferentes criterios
+umbral_mediana <- median(datos_modelo$score_riesgo)
+umbral_media <- mean(datos_modelo$score_riesgo)
+umbral_percentil_66 <- quantile(datos_modelo$score_riesgo, 0.66)
+umbral_percentil_75 <- quantile(datos_modelo$score_riesgo, 0.75)
+umbral_percentil_80 <- quantile(datos_modelo$score_riesgo, 0.80)
+
+# Crear grupos basados en los umbrales
+datos_modelo$rango_riesgo_mediana <- ifelse(datos_modelo$score_riesgo >= umbral_mediana, "Alto", "Bajo")
+datos_modelo$rango_riesgo_media <- ifelse(datos_modelo$score_riesgo >= umbral_media, "Alto", "Bajo")
+datos_modelo$rango_riesgo_percentil_66 <- ifelse(datos_modelo$score_riesgo >= umbral_percentil_66, "Alto", "Bajo")
+datos_modelo$rango_riesgo_percentil_75 <- ifelse(datos_modelo$score_riesgo >= umbral_percentil_75, "Alto", "Bajo")
+datos_modelo$rango_riesgo_percentil_80 <- ifelse(datos_modelo$score_riesgo >= umbral_percentil_80, "Alto", "Bajo")
+
+# Graficar curvas de supervivencia para cada criterio
+
+# Curva basada en la mediana
+ggsurv_mediana <- ggsurvplot(
+  survfit(Surv(time, status) ~ rango_riesgo_mediana, data = datos_modelo),
+  data = datos_modelo,
+  risk.table = TRUE,
+  pval = TRUE,
+  title = "Supervivencia (Mediana del score de riesgo)",
+  xlab = "Tiempo",
+  ylab = "Supervivencia",
+  risk.table.title = "Pacientes en riesgo", 
+  legend.title = "Grupo de riesgo",
+  legend.labs = c("Alto", "Bajo"),
+  palette = c("blue", "red"),
+  ggtheme = theme_minimal()
+)
+
+# Curva basada en la media
+ggsurv_media <- ggsurvplot(
+  survfit(Surv(time, status) ~ rango_riesgo_media, data = datos_modelo),
+  data = datos_modelo,
+  risk.table = TRUE,
+  pval = TRUE,
+  title = "Supervivencia (Media del score de riesgo)",
+  xlab = "Tiempo",
+  ylab = "Supervivencia",
+  risk.table.title = "Pacientes en riesgo", 
+  legend.title = "Grupo de riesgo",
+  legend.labs = c("Alto", "Bajo"),
+  palette = c("blue", "red"),
+  ggtheme = theme_minimal()
+)
+
+# Curva basada en el percentil 66
+ggsurv_percentil_66 <- ggsurvplot(
+  survfit(Surv(time, status) ~ rango_riesgo_percentil_66, data = datos_modelo),
+  data = datos_modelo,
+  risk.table = TRUE,
+  pval = TRUE,
+  title = "Supervivencia (Percentil 66 del score de riesgo)",
+  xlab = "Tiempo",
+  ylab = "Supervivencia",
+  risk.table.title = "Pacientes en riesgo", 
+  legend.title = "Grupo de riesgo",
+  legend.labs = c("Alto", "Bajo"),
+  palette = c("blue", "red"),
+  ggtheme = theme_minimal()
+)
+
+# Curva basada en el percentil 75
+ggsurv_percentil_75 <- ggsurvplot(
+  survfit(Surv(time, status) ~ rango_riesgo_percentil_75, data = datos_modelo),
+  data = datos_modelo,
+  risk.table = TRUE,
+  pval = TRUE,
+  title = "Supervivencia (Percentil 75 del score de riesgo)",
+  xlab = "Tiempo",
+  ylab = "Supervivencia",
+  risk.table.title = "Pacientes en riesgo", 
+  legend.title = "Grupo de riesgo",
+  legend.labs = c("Alto", "Bajo"),
+  palette = c("blue", "red"),
+  ggtheme = theme_minimal()
+)
+
+# Curva basada en el percentil 80
+ggsurv_percentil_80 <- ggsurvplot(
+  survfit(Surv(time, status) ~ rango_riesgo_percentil_80, data = datos_modelo),
+  data = datos_modelo,
+  risk.table = TRUE,
+  pval = TRUE,
+  title = "Supervivencia (Percentil 80 del score de riesgo)",
+  xlab = "Tiempo",
+  ylab = "Supervivencia",
+  risk.table.title = "Pacientes en riesgo", 
+  legend.title = "Grupo de riesgo",
+  legend.labs = c("Alto", "Bajo"),
+  palette = c("blue", "red"),
+  ggtheme = theme_minimal()
+)
+
+# Mostrar cada gráfico por separado
+print(ggsurv_mediana)
+print(ggsurv_media)
+print(ggsurv_percentil_66)
+print(ggsurv_percentil_75)
+print(ggsurv_percentil_80)
+
+```
+
+Clustering jerárquico
+```{r}
+# Clustering Jerárquico 
+d <- dist(datos_modelo$score_riesgo)  # Distancia euclidiana
+hc <- hclust(d, method = "ward.D2")  # Clustering jerárquico con Ward
+grupos_hc <- cutree(hc, k = 2)  # Cortar el dendrograma en 2 grupos
+datos_modelo$grupo_hc <- as.factor(grupos_hc)
+
+# Visualización de curvas de supervivencia (Jerárquico)
+ggsurv_hc <- ggsurvplot(
+  survfit(Surv(time, status) ~ grupo_hc, data = datos_modelo),
+  data = datos_modelo,
+  risk.table = TRUE,
+  pval = TRUE,
+  title = "Supervivencia (Clustering Jerárquico)",
+  xlab = "Tiempo",
+  ylab = "Supervivencia",
+  risk.table.title = "Pacientes en riesgo", 
+  legend.title = "Grupo de riesgo",
+  legend.labs = c("Alto", "Bajo"),
+  palette = c("blue", "red"),
+  risk.table.height = 0.37,
+  ggtheme = theme_minimal(base_size = 15)
+)
+print(ggsurv_hc)
+```
+
+K-medias, K-medias con aumento de repeticiones de inicialización y k-medias con inicialización aleatoria
+```{r}
+# K-medias
+set.seed(123)  # Semilla para reproducibilidad
+kmeans_result <- kmeans(datos_modelo$score_riesgo, centers = 2)
+datos_modelo$grupo_kmeans <- as.factor(kmeans_result$cluster)
+
+# Visualización de curvas de supervivencia (K-medias)
+ggsurv_kmeans <- ggsurvplot(
+  survfit(Surv(time, status) ~ grupo_kmeans, data = datos_modelo),
+  data = datos_modelo,
+  risk.table = TRUE,
+  pval = TRUE,
+  title = "Supervivencia (K-medias)",
+  xlab = "Tiempo",
+  ylab = "Supervivencia",
+  risk.table.title = "Pacientes en riesgo",  
+  legend.title = "Grupo de riesgo",
+  legend.labs = c("Alto", "Bajo"),
+  palette = c("blue", "red"),
+  risk.table.height = 0.37,
+  ggtheme = theme_minimal(base_size = 15)
+)
+print(ggsurv_kmeans)
+
+
+#  K-means para dividir en 2 grupos basados en el score de riesgo
+set.seed(333)  
+kmeans_result <- kmeans(survival_data$risk_score, centers = 2)
+
+# Asignar el grupo de riesgo: bajo (0) y alto (1)
+# Reasignamos basado en la media de los centros de K-means
+centers <- kmeans_result$centers
+group_assignment <- ifelse(
+  survival_data$risk_score >= mean(centers),
+  "Alto",
+  "Bajo"
+)
+survival_data$risk_group <- factor(group_assignment, levels = c("Bajo", "Alto"))
+
+# Graficar las curvas de supervivencia según el grupo de riesgo
+ggsurvplot(
+  survfit(Surv(time, status) ~ risk_group, data = survival_data),
+  data = survival_data,
+  risk.table = TRUE,
+  pval = TRUE,
+  title = "Supervivencia (+ repeticiones inicialización)",
+  xlab = "Tiempo",
+  ylab = "Supervivencia",
+  risk.table.title = "Pacientes en riesgo", 
+  legend.title = "Grupo de riesgo",
+  legend.labs = c("Bajo", "Alto"),
+  palette = c("blue", "red"),
+  risk.table.height = 0.37, 
+  ggtheme = theme_minimal(base_size = 15)
+)
+
+
+# K medias con inicialización aleatoria
+set.seed(333)
+kmeans_random <- kmeans(survival_data$risk_score, centers = 2, nstart = 50)
+
+# Ver los resultados
+kmeans_random$centers  # Centroides de los grupos
+kmeans_random$tot.withinss  # Error total dentro de los grupos
+
+# Asignar los grupos de riesgo: bajo (0) y alto (1)
+centers <- kmeans_random$centers
+group_assignment <- ifelse(
+  survival_data$risk_score >= mean(centers),
+  "Alto",
+  "Bajo"
+)
+survival_data$risk_group <- factor(group_assignment, levels = c("Bajo", "Alto"))
+
+# Graficar las curvas de supervivencia 
+library(survminer)
+ggsurvplot(
+  survfit(Surv(time, status) ~ risk_group, data = survival_data),
+  data = survival_data,
+  risk.table = TRUE,
+  pval = TRUE,
+  title = "Supervivencia (K-medias random)",
+  xlab = "Tiempo",
+  ylab = "Supervivencia",
+  risk.table.title = "Pacientes en riesgo", 
+  legend.title = "Grupo de riesgo",
+  legend.labs = c("Bajo", "Alto"),
+  palette = c("blue", "red"),
+  risk.table.height = 0.37, 
+  ggtheme = theme_minimal(base_size = 15)
+)
+
+```
+
+
+Clustering Basado en Densidad (DBSCAN)
+```{r}
+if (!requireNamespace("dbscan", quietly = TRUE)) {
+    install.packages("dbscan")
+}
+library(dbscan)
+
+# Ejecutar DBSCAN 
+set.seed(333)  # Asegurar reproducibilidad
+eps_value <- 0.1  # Radio inicial para la vecindad (ajustable)
+minPts_value <- 15  # Puntos mínimos para formar un clúster
+
+dbscan_result <- dbscan(as.matrix(survival_data$risk_score), eps = eps_value, minPts = minPts_value)
+
+# Ver resultados
+table(dbscan_result$cluster)  # -1 indica puntos ruidosos
+
+# Asignar los clústeres al conjunto de datos
+survival_data$dbscan_cluster <- factor(dbscan_result$cluster)
+
+library(survminer)
+library(survival)
+
+# Graficar curvas de supervivencia para los clústeres DBSCAN
+ggsurvplot(
+  survfit(Surv(time, status) ~ dbscan_cluster, data = survival_data),
+  data = survival_data,
+  risk.table = TRUE,
+  pval = TRUE,
+  title = "Supervivencia (DBSCAN)",
+  xlab = "Tiempo",
+  ylab = "Supervivencia",
+  risk.table.title = "Pacientes en riesgo", 
+  legend.title = "Grupos de riesgo",
+  legend.labs = c("Alto", "Bajo"),
+  palette = "Dark2",
+  risk.table.height = 0.37, 
+  ggtheme = theme_minimal(base_size = 15)
+)
+
+```
+
+
+
+
+
+
+
+

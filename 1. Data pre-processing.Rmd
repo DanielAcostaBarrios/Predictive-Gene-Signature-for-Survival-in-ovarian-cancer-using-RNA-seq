@@ -1,0 +1,79 @@
+---
+title: "Preprocesamiento de datos y selección de pacientes"
+output: html_document
+---
+
+---------------------------------------------------------
+*DESCARGA DE DATOS*
+
+```{r}
+# Instalar los paquetes BiocManager y TCGAbiolinks si no están instalados
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("TCGAbiolinks")
+
+library(TCGAbiolinks)
+
+
+# Definir el proyecto
+supervivencia_ov  <- "TCGA-OV"
+
+# Descargar los datos de RNA-seq del proyecto TCGA
+query_rna <- GDCquery(
+  project = supervivencia_ov,
+  data.category = "Transcriptome Profiling",
+  data.type = "Gene Expression Quantification",
+  workflow.type = "STAR - Counts" 
+)
+
+GDCdownload(query_rna)
+datos_ovario <- GDCprepare(query = query_rna)
+```
+
+
+---------------------------------------------------------
+*FILTRADO DE MUESTRAS*
+
+```{r}
+library(SummarizedExperiment)
+
+# Extraer los datos clínicos
+datos_clinicos <- colData(datos_ovario)
+
+# Filtrar las muestras que tengan datos clínicos de supervivencia completos
+datos_clinicos_filtrados <- datos_clinicos[
+  !is.na(datos_clinicos$vital_status) &
+  (!is.na(datos_clinicos$days_to_death)                        
+   |!is.na(datos_clinicos$days_to_last_follow_up)), ]
+
+# Filtrar los datos de expresión utilizando los datos clínicos filtrados
+muestras_filtradas <- rownames(datos_clinicos_filtrados)
+muestras_filtradas
+
+# Guardar los datos de las muestras filtradas
+datos_ovario_filtrados <- datos_ovario[, muestras_filtradas]
+```
+
+
+---------------------------------------------------------
+*NORMALIZACIÓN*
+
+```{r}
+# Obtener los datos de expresión normalizados en TPM tras el filtrado
+datos_expresion_filtrados <- assay(datos_ovario_filtrados, "tpm_unstrand")
+
+```
+
+```{r}
+# Verificar si coinciden el número de muestras en los datos de expresión y en los datos clínicos
+num_muestras_expresion <- ncol(datos_expresion_filtrados)
+num_muestras_clinicas <- nrow(colData(datos_ovario_filtrados))
+print(paste("Número de muestras en expresión génica:", num_muestras_expresion))
+print(paste("Número de muestras en datos clínicos:", num_muestras_clinicas))
+
+```
+
+
+
+
+

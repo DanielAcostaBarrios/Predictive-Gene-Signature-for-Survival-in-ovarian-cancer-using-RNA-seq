@@ -1,0 +1,524 @@
+---
+title: "Outliers"
+output: html_document
+---
+
+--------------------------------------------------------------------------------
+*OBTENER UNA LISTA CON LOS OUTLIERS*
+
+```{r}
+# Crear un data.frame para almacenar los outliers de todas las iteraciones
+outliers_data <- data.frame()
+
+# Modificar el loop para recolectar outliers
+for (i in 1:n_folds) {
+  # Dividir en conjunto de entrenamiento y prueba
+  test_idx <- folds[[i]]
+  train_data <- survival_data[-test_idx, ]
+  test_data <- survival_data[test_idx, ]
+  
+  # Ajustar el modelo de Cox en el conjunto de entrenamiento
+  modelo_cox_train <- coxph(Surv(time, status) ~ ., data = train_data)
+  
+  # Calcular los scores de riesgo en el conjunto de prueba
+  test_data$risk_score <- predict(modelo_cox_train, newdata = test_data, type = "risk")
+  
+  # Ejecutar DBSCAN sobre los scores de riesgo
+  dbscan_result <- dbscan(as.matrix(test_data$risk_score), eps = eps_value, minPts = minPts_value)
+  
+  # Asignar los clústeres de DBSCAN al conjunto de prueba
+  test_data$dbscan_cluster <- factor(dbscan_result$cluster)
+  
+  # Filtrar los puntos clasificados como outliers (ruido, clúster 0)
+  outliers <- test_data[dbscan_result$cluster == 0, ]
+  
+  # Agregar información del fold actual
+  outliers$fold <- i
+  
+  # Combinar los outliers en el data.frame general
+  outliers_data <- rbind(outliers_data, outliers)
+}
+
+# Revisar los outliers combinados
+print(outliers_data)
+``` 
+
+
+--------------------------------------------------------------------------------
+*CÓDIGO PARA EXTRAER LOS OUTLIERS*
+```{r}
+# Asegurarnos de que los identificadores estén en el mismo formato
+matching_ids <- rownames(outliers_data)  # Identificadores en 'outliers_data'
+datos_clinicos_filtrados$barcode <- trimws(datos_clinicos_filtrados$barcode)  # Limpiar espacios
+
+# Filtrar datos_clinicos_filtrados para incluir solo las muestras que están en matching_ids
+outliers_clinicos <- datos_clinicos_filtrados[datos_clinicos_filtrados$barcode %in% matching_ids, ]
+
+# Verificar el número de filas para asegurarnos de que el filtrado se realizó correctamente
+cat("Número de muestras en el dataframe filtrado:", nrow(outliers_clinicos), "\n")
+
+```
+
+*CÓDIGO PARA EXTRAER LOS NO - OUTLIERS*
+```{r}
+# Asegurarnos de que los identificadores estén en el mismo formato
+matching_ids <- rownames(outliers_data)  # Identificadores en 'outliers_data'
+datos_clinicos_filtrados$barcode <- trimws(datos_clinicos_filtrados$barcode)  # Limpiar espacios
+
+# Filtrar datos_clinicos_filtrados para incluir solo las muestras que NO están en matching_ids
+no_outliers_clinicos <- datos_clinicos_filtrados[!(datos_clinicos_filtrados$barcode %in% matching_ids), ]
+
+# Verificar el número de filas para asegurarnos de que el filtrado se realizó correctamente
+cat("Número de muestras en el dataframe filtrado (no_outliers_clinicos):", nrow(no_outliers_clinicos), "\n")
+
+```
+
+
+--------------------------------------------------------------------------------
+*ANÁLISIS CLÍNICO DE LOS OUTLIERS*
+
+```{r}
+# Convertir a data frame
+clinicos_outliers <- as.data.frame(outliers_clinicos)
+clinicos_no_outliers <- as.data.frame(no_outliers_clinicos)
+
+# Variables a analizar
+variables_outliers_1 <- c("status", "age_at_index", "shortest_dimension", "intermediate_dimension", "longest_dimension")
+
+# Calcular medias para outliers y redondear a 4 decimales
+medias_outliers <- sapply(variables_outliers_1, function(var) {
+  round(mean(clinicos_outliers[[var]], na.rm = TRUE), 4)
+})
+
+# Calcular medias para no_outliers y redondear a 4 decimales
+medias_no_outliers <- sapply(variables_outliers_1, function(var) {
+  round(mean(clinicos_no_outliers[[var]], na.rm = TRUE), 4)
+})
+
+# Realizar la prueba T de Student para cada variable
+resultados_t_test <- sapply(variables_outliers_1, function(var) {
+  round(t.test(clinicos_outliers[[var]], clinicos_no_outliers[[var]], na.rm = TRUE)$p.value, 9)
+})
+
+# Combinar los resultados en un dataframe
+analisis_outliers_1 <- data.frame(
+  Variable = variables_outliers_1,
+  Media_Outliers = medias_outliers,
+  Media_No_Outliers = medias_no_outliers,
+  p_value = resultados_t_test
+)
+
+# Mostrar el resultado
+print(analisis_outliers_1)
+
+```
+
+```{r}
+# Variables cualitativas
+variables_cualitativas <- c("sample_type", "race", "ethnicity")
+
+# Función para calcular porcentajes con redondeo a dos decimales
+calcular_porcentajes <- function(data) {
+  lapply(variables_cualitativas, function(var) {
+    pct_table <- prop.table(table(data[[var]], useNA = "ifany")) * 100
+    round(pct_table, 2)
+  })
+}
+
+# Calcular porcentajes para outliers y no_outliers
+porcentajes_outliers <- calcular_porcentajes(clinicos_outliers)
+porcentajes_no_outliers <- calcular_porcentajes(clinicos_no_outliers)
+
+# Función para calcular p-values con el test de chi-cuadrado
+calcular_p_values <- function(var, data_outliers, data_no_outliers) {
+  tabla_outliers <- table(data_outliers[[var]], useNA = "ifany")
+  tabla_no_outliers <- table(data_no_outliers[[var]], useNA = "ifany")
+  
+  categorias_completas <- union(names(tabla_outliers), names(tabla_no_outliers))
+  tabla_outliers_completa <- setNames(tabla_outliers[categorias_completas], categorias_completas)
+  tabla_no_outliers_completa <- setNames(tabla_no_outliers[categorias_completas], categorias_completas)
+  tabla_contingencia <- rbind(tabla_outliers_completa, tabla_no_outliers_completa)
+  
+  tabla_contingencia[is.na(tabla_contingencia)] <- 0
+  
+  if (ncol(tabla_contingencia) > 1) {
+    test_result <- chisq.test(tabla_contingencia)
+    return(test_result$p.value)
+  } else {
+    return(NA)
+  }
+}
+
+# Calcular p-values para todas las variables cualitativas excepto figo_stage
+p_values <- sapply(variables_cualitativas, function(var) {
+  calcular_p_values(var, clinicos_outliers, clinicos_no_outliers)
+})
+
+# Resultado para FIGO_STAGE
+figo_outliers <- c(0, 0, 0, 2.17, 0, 4.35, 71.74, 21.74)
+figo_no_outliers <- c(0.26, 0.79, 1.31, 4.45, 1.83, 3.66, 72.77, 14.14)
+tabla_figo <- rbind(figo_outliers, figo_no_outliers)
+rownames(tabla_figo) <- c("Outliers", "No_Outliers")
+colnames(tabla_figo) <- c("Stage IC", "Stage IIA", "Stage IIB", "Stage IIC",
+                          "Stage IIIA", "Stage IIIB", "Stage IIIC", "Stage IV")
+resultado_chi_figo <- chisq.test(tabla_figo)
+
+# Imprimir resultados generales
+for (i in seq_along(variables_cualitativas)) {
+  var <- variables_cualitativas[i]
+  cat("\n=============================================\n")
+  cat("Variable:", var, "\n")
+  cat("Porcentajes para Outliers:\n")
+  print(porcentajes_outliers[[i]])
+  cat("Porcentajes para No Outliers:\n")
+  print(porcentajes_no_outliers[[i]])
+  cat("p-value=", round(p_values[i], 4), "\n")
+}
+
+# Imprimir resultado para FIGO_STAGE
+cat("\n=============================================\n")
+cat("Variable: figo_stage\n")
+cat("Tabla de frecuencias:\n")
+print(tabla_figo)
+cat("p-value=", round(resultado_chi_figo$p.value, 4), "\n")
+
+# Frecuencias observadas para Stage IV en ambos grupos
+stage_iv_outliers <- 21.74  # Aproximado en porcentaje
+stage_iv_no_outliers <- 14.14  # Aproximado en porcentaje
+
+# Total de casos en cada grupo
+total_outliers <- sum(c(0, 0, 0, 2.17, 0, 4.35, 71.74, 21.74))
+total_no_outliers <- sum(c(0.26, 0.79, 1.31, 4.45, 1.83, 3.66, 72.77, 14.14))
+
+# Convertir porcentajes a números absolutos
+abs_stage_iv_outliers <- (stage_iv_outliers / 100) * total_outliers
+abs_stage_iv_no_outliers <- (stage_iv_no_outliers / 100) * total_no_outliers
+
+# Crear los valores necesarios para el test de proporciones
+x <- c(abs_stage_iv_outliers, abs_stage_iv_no_outliers)  # Casos en Stage IV
+n <- c(total_outliers, total_no_outliers)  # Totales por grupo
+
+# Test de proporciones (Z-test)
+resultado_proporciones <- prop.test(x = x, n = n)
+
+# Mostrar resultados
+cat("\n")
+cat("Comparación de proporciones en Stage IV entre Outliers y No_Outliers:\n")
+cat("Proporción Outliers (Stage IV):", round(x[1] / n[1], 4), "\n")
+cat("Proporción No_Outliers (Stage IV):", round(x[2] / n[2], 4), "\n")
+cat("p-value del test de proporciones:", round(resultado_proporciones$p.value, 4), "\n")
+```
+
+
+--------------------------------------------------------------------------------
+*ANÁLISIS DE EXPRESIÓN DIFERENCIAL: OUTLIERS*
+
+Obtener los datos de expresión
+```{r}
+library(SummarizedExperiment)
+# Identificar muestras presentes en ambos conjuntos
+outl_muestras_filtradas <- outliers_clinicos$barcode
+outl_datos_expresion_filtrados <- assay(datos_ovario, "tpm_unstrand")[, outl_muestras_filtradas]
+
+```
+
+```{r}
+# Verificar si coincide el número de muestras en los datos de expresión y en colData
+outl_num_muestras_expresion <- ncol(outl_datos_expresion_filtrados)
+num_muestras_clinicas <- nrow(colData(datos_ovario_filtrados))
+print(paste("Número de muestras en expresión génica:", outl_num_muestras_expresion))
+print(paste("Número de muestras en datos clínicos:", num_muestras_clinicas))
+
+```
+
+
+Obtener los datos de supervivencia
+```{r}
+# Definir la variable 'status' para el estado del paciente (1 = fallecido, 0 = vivo)
+outliers_clinicos$status <- ifelse(
+  outliers_clinicos$vital_status == "Dead", 1, 0
+)
+
+# Definir la variable 'time' para el tiempo de seguimiento
+outliers_clinicos$time <- ifelse(
+  is.na(outliers_clinicos$days_to_death), 
+  outliers_clinicos$days_to_last_follow_up, 
+  outliers_clinicos$days_to_death
+)
+
+# Reordenar las filas de datos clínicos y columnas de datos de expresión
+outliers_clinicos <- outliers_clinicos[rownames(outliers_clinicos) %in% colnames(outl_datos_expresion_filtrados), ]
+outl_datos_expresion_filtrados <- outl_datos_expresion_filtrados[, rownames(outliers_clinicos)]
+
+# Crear un data frame para los datos de supervivencia
+survival_data_outl <- data.frame(
+  time = outliers_clinicos$time,
+  status = outliers_clinicos$status
+)
+
+```
+
+
+Análisis Univariante de Cox
+```{r}
+# Instalar y cargar el paquete "survival"
+if (!requireNamespace("survival", quietly = TRUE)) {
+    install.packages("survival")
+}
+library(survival)
+
+# Crear un dataframe para almacenar los resultados
+resultados_cox_outl <- data.frame(Gene = character(), HR = numeric(), p.value = numeric(), stringsAsFactors = FALSE)
+
+# Iterar sobre cada gen en la matriz de expresión génica
+for (gen in rownames(outl_datos_expresion_filtrados)) {
+  
+  # Obtener los niveles de expresión del gen
+  expresion <- outl_datos_expresion_filtrados[gen, ]
+  
+  # Fórmula para el modelo de Cox
+  cox_formula <- as.formula(Surv(time, status) ~ expresion)
+  
+  # Ajustar el modelo de Cox
+  cox_modelo <- coxph(cox_formula, data = outliers_clinicos)
+  
+  # Extraer el índice de riesgo (HR) y el p-value
+  summary_cox <- summary(cox_modelo)
+  HR <- summary_cox$coefficients[,"exp(coef)"]
+  p.value <- summary_cox$coefficients[,"Pr(>|z|)"]
+  
+  # Almacenar los resultados en el dataframe
+  resultados_cox_outl <- rbind(resultados_cox_outl, data.frame(Gene = gen, HR = HR, p.value = p.value))
+}
+
+```
+
+Correción mediante Benjamini-Hochberg 
+```{r}
+# Comprobar si hay valores faltantes (NA) en los p-valores
+any(is.na(resultados_cox_outl$p.value))
+
+# Eliminar filas con NA en los p-valores
+resultados_cox_outl <- resultados_cox_outl[!is.na(resultados_cox_outl$p.value), ]
+
+
+# Aplicar el método de Benjamini-Hochberg 
+resultados_cox_outl$p.adjust <- p.adjust(resultados_cox_outl$p.value, method = "BH")
+
+# Filtrar los genes con p-valores ajustados significativos
+genes_significativos_ajustados_outl <- resultados_cox_outl[resultados_cox_outl$p.adjust < 0.57, ]
+
+print(genes_significativos_ajustados_outl)
+
+```
+
+
+--------------------------------------------------------------------------------
+*ANÁLISIS DE EXPRESIÓN DIFERENCIAL: OUTLIERS VS NO-OUTLIERS*
+
+Obtener datos expresion no normalizados
+```{r}
+barcodes_outliers <- c("TCGA-23-1111-01A-01R-1567-13",
+          "TCGA-24-2033-01A-01R-1568-13",
+          "TCGA-25-1329-01A-01R-1565-13",
+          "TCGA-61-2109-01A-01R-1568-13",
+          "TCGA-10-0926-01A-01R-1564-13",
+          "TCGA-WR-A838-01A-12R-A406-31",
+          "TCGA-04-1337-01A-01R-1564-13",
+          "TCGA-24-0970-01B-01R-1565-13",
+          "TCGA-24-1434-01A-01R-1566-13",
+          "TCGA-13-0795-01A-01R-1564-13",
+          "TCGA-23-1032-01A-02R-1564-13",
+          "TCGA-24-1416-01A-01R-1565-13",
+          "TCGA-09-2054-01A-01R-1568-13",
+          "TCGA-25-2392-01A-01R-1569-13",
+          "TCGA-13-1405-01A-01R-1565-13",
+          "TCGA-13-0714-01A-01R-1564-13",
+          "TCGA-10-0933-01A-01R-1569-13",
+          "TCGA-25-1877-01A-01R-1567-13",
+          "TCGA-13-0730-01A-01R-1564-13",
+          "TCGA-25-1626-01A-01R-1566-13",
+          "TCGA-10-0938-01A-02R-1564-13",
+          "TCGA-24-2261-01A-01R-1568-13",
+          "TCGA-24-1923-01A-01R-1567-13",
+          "TCGA-24-2262-01A-01R-1568-13",
+          "TCGA-24-2288-01A-01R-1568-13",
+          "TCGA-13-0724-01A-01R-1564-13",
+          "TCGA-61-1900-01A-01R-1567-13",
+          "TCGA-25-1870-01A-01R-1567-13",
+          "TCGA-61-2113-01A-01R-1568-13",
+          "TCGA-24-1418-01A-01R-1565-13",
+          "TCGA-24-1567-01A-01R-1566-13",
+          "TCGA-61-2102-01A-01R-1568-13",
+          "TCGA-29-1761-01A-01R-1567-13",
+          "TCGA-04-1517-01A-01R-1565-13",
+          "TCGA-25-2042-01A-01R-1568-13",
+          "TCGA-23-1116-01A-01R-1564-13",
+          "TCGA-24-1558-01A-01R-1566-13",
+          "TCGA-13-0727-01A-01R-1564-13",
+          "TCGA-VG-A8LO-01A-11R-A406-31",
+          "TCGA-23-1120-01A-02R-1565-13",
+          "TCGA-25-1323-01A-01R-1565-13",
+          "TCGA-25-2397-01A-01R-1569-13",
+          "TCGA-61-1724-01A-01R-1568-13",
+          "TCGA-25-2399-01A-01R-1569-13",
+          "TCGA-59-2350-01A-01R-1569-13",
+          "TCGA-25-1312-01A-01R-1565-13")
+
+# Filtrar outliers (las columnas con barcodes que están en barcode_outliers)
+outliers_final <- datos_ovario_filtrados[, colnames(datos_ovario_filtrados) %in% barcodes_outliers]
+
+# Filtrar no_outliers (las columnas con barcodes que NO están en barcode_outliers)
+no_outliers_final <- datos_ovario_filtrados[, !(colnames(datos_ovario_filtrados) %in% barcodes_outliers)]
+
+datos_expresion_outliers <- assay(outliers_final, "unstranded")
+datos_expresion_no_outliers <- assay(no_outliers_final, "unstranded")
+
+```
+
+
+Análisis comparativo mediante DESeq2
+```{r}
+# Instalar DESeq2 si no está instalado
+if (!requireNamespace("DESeq2", quietly = TRUE)) {
+  install.packages("BiocManager")
+  BiocManager::install("DESeq2")
+}
+
+# Cargar el paquete DESeq2
+library(DESeq2)
+
+# Paso 1: Combinar las matrices de expresión de outliers y no_outliers
+# Añadimos un identificador para las condiciones
+datos_expresion_combinados <- cbind(datos_expresion_outliers, datos_expresion_no_outliers)
+
+# Crear una tabla de condiciones (metadata)
+# Asumimos que las columnas de datos_expresion_outliers y datos_expresion_no_outliers tienen nombres únicos
+condiciones <- c(rep("outliers", ncol(datos_expresion_outliers)),
+                 rep("no_outliers", ncol(datos_expresion_no_outliers)))
+
+# Convertir a un dataframe para DESeq2
+metadata <- data.frame(
+  row.names = colnames(datos_expresion_combinados),  
+  condition = factor(condiciones)                  
+)
+
+# Paso 2: Crear el objeto DESeqDataSet
+dds <- DESeqDataSetFromMatrix(
+  countData = datos_expresion_combinados,
+  colData = metadata,
+  design = ~ condition
+)
+
+# Filtrar genes con muy pocos conteos
+dds <- dds[rowSums(counts(dds)) > 10, ]
+
+# Paso 3: Realizar el análisis diferencial
+dds <- DESeq(dds)
+
+# Paso 4: Extraer resultados
+res <- results(dds, contrast = c("condition", "outliers", "no_outliers"))
+
+# Ordenar los resultados por valor ajustado (padj)
+res <- res[order(res$padj), ]
+
+# Paso 5: Mostrar un resumen de los resultados
+summary(res)
+
+# Paso 6: Guardar resultados significativos en un dataframe
+# Filtrar genes significativos (padj < 0.05) y descartar NAs
+res_signif <- res[!is.na(res$padj) & res$padj < 0.05, ]
+
+# Mostrar genes significativos
+head(res_signif)
+```
+
+
+--------------------------------------------------------------------------------
+*ANÁLISIS ENRIQUECIMIENTO FUNCIONAL OUTLIERS*
+
+Obtener genes significativos
+```{r}
+# Filtra genes con un padj < 0.05 (u otro criterio de significancia)
+genes_signif_outl <- rownames(res_signif[which(res_signif$padj < 0.05), ])
+
+# Convierte los nombres de los genes en un vector de caracteres
+genes_signif_outl <- as.character(genes_signif_outl)
+
+```
+
+Convertir los identificadores de Ensembl a símbolos de genes
+```{r}
+# Convertir la matriz `all_top_genes` en un vector
+genes_signif_outl <- as.vector(genes_signif_outl)
+
+# Verificar el contenido del vector convertido
+head(genes_signif_outl)  # Mostrar los primeros elementos para comprobar
+
+# Eliminar la versión de los identificadores de Ensembl
+genes_signif_outl_clean <- sub("\\..*", "", genes_signif_outl)
+
+# Verificar los primeros identificadores limpios
+head(genes_signif_outl_clean)
+summary(genes_signif_outl_clean)
+```
+
+```{r}
+# Instalar y cargar biomaRt si no está instalado
+if (!requireNamespace("biomaRt", quietly = TRUE)) {
+  install.packages("biomaRt")
+}
+library(biomaRt)
+
+# Conectar a la base de datos de Ensembl
+ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+
+# Limpiar la lista de genes (asegurarse de que no haya NA o identificadores vacíos)
+genes_signif_outl_clean <- na.omit(genes_signif_outl_clean)  # Elimina NA si existen
+    # Elimina duplicados
+
+# Realizar la consulta con los identificadores limpios
+symbols_genes_outl <- getBM(attributes = c("ensembl_gene_id", "hgnc_symbol"),
+                       filters = "ensembl_gene_id",
+                       values = genes_signif_outl_clean,
+                       mart = ensembl)
+
+# Ver los primeros resultados de la consulta
+head(symbols_genes_outl)
+summary(symbols_genes_outl)
+
+
+# Verificar si algunos genes no se mapearon
+unmapped_genes_outl <- setdiff(genes_signif_outl_clean, symbols_genes_outl$ensembl_gene_id)
+
+print(paste("Genes no mapeados:", length(unmapped_genes_outl)))
+print(unmapped_genes_outl)
+
+```
+
+Realizar el análisis de enriquecimiento GO
+```{r}
+# Cargar librerías necesarias
+library(clusterProfiler)
+library(org.Hs.eg.db)
+
+# Convertir los identificadores de Ensembl a identificadores Entrez
+# Asegurarse de usar los identificadores limpios (sin versión)
+genes_entrez_outl <- bitr(genes_signif_outl_clean, fromType = "ENSEMBL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+
+# Realizar el análisis de enriquecimiento GO
+go_enrichment_outl <- enrichGO(
+  gene = genes_entrez_outl$ENTREZID,
+  OrgDb = org.Hs.eg.db,
+  ont = "BP",  # Biological Process
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.05,
+  qvalueCutoff = 0.2
+)
+
+go_enrichment_outl
+```
+
+
+
+
