@@ -1,5 +1,5 @@
-# Predictive-Gene-Signature-for-Survival-in-ovarian-cancer-using-RNA-seq
-## Development and validation of a Predictive Gene Signature for Survival in ovarian cancer using RNA-seq
+# Predictive-Gene-Signature-for-Survival-in-Ovarian-Cancer
+## Development and validation of a predictive gene signature for survival in ovarian cancer using RNA-seq data
 
 Ovarian cancer is the most lethal gynecological neoplasm worldwide, mainly due to its late diagnosis in advanced stages and the absence of effective early detection methods. This project aims to develop a gene signature predictive of survival in ovarian cancer, using RNA-seq transcriptomic and clinical data available from public databases such as The Cancer Genome Atlas (TCGA). The analysis has been conducted using the R programming language.
 
